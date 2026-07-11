@@ -1,0 +1,14 @@
+/* Swipe Compare & Bookmark - styles
+   참고: 모달/오버레이의 위치·크기는 index.js에서 인라인 스타일(!important)로
+   강제 지정합니다. 실리태번 자체 CSS나 모바일 브라우저 뷰포트 이슈로
+   위치가 틀어지는 걸 막기 위한 조치이며, 이 파일이 안 불러와져도
+   모달은 항상 화면 정중앙에 뜹니다. */
+
+.swipe-compare-btn {
+    cursor: pointer;
+}
+
+.swipe-compare-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+}
