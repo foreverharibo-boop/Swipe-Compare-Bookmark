@@ -1,5 +1,14 @@
 # Swipe Compare & Bookmark
 
+## 0.1.1 — 비교 버튼 갱신 줄이기 (2026-11-09)
+
+- 채팅 화면 변경마다 모든 메시지를 확인하던 작업을 변경된 메시지의 버튼 갱신으로 바꿨습니다. 연속 변경과 중복 이벤트는 한 번으로 묶습니다.
+- 최초 로드, 채팅방 전환, 앱 복귀 때 전체 버튼을 확인합니다. 메시지 번호를 제공하지 않는 호스트 이벤트에도 전체 확인으로 대응합니다.
+- 다른 앱으로 이동하면 버튼 갱신을 멈추고 복귀할 때 반영합니다.
+- 스와이프 비교, 원문/번역 보기, 즐겨찾기, 라벨, 버전 선택과 채팅 저장 형식은 유지합니다.
+
+검증: `node --test tests/scheduler-unit.test.cjs`로 부분 갱신, 변경 묶기, 숨김/복귀, 메시지 번호 변경을 확인합니다. 실제 버튼·갤러리 통합 테스트는 Playwright 및 Chromium 설치 후 `node --test tests/scheduler.test.cjs`로 별도 실행합니다. 단위 테스트는 Android/WebView 화면 검증을 대신하지 않습니다.
+
 SillyTavern 확장입니다.
 
 원본 저장소: https://github.com/foreverharibo-boop/Swipe-Compare-Bookmark

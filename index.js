@@ -262,33 +262,105 @@
     // ---------------------------------------------------------------------
     // 메시지 하단 "비교" 버튼 주입
     // ---------------------------------------------------------------------
-    function injectButtonsForAllMessages() {
-        const mesElements = document.querySelectorAll(SELECTORS.mes);
-        mesElements.forEach((mesEl) => {
-            const mesId = mesEl.getAttribute(SELECTORS.mesIdAttr);
-            if (mesId === null) return;
+    function updateMessageButton(mesEl) {
+        if (!mesEl.isConnected) return;
+        const mesId = mesEl.getAttribute(SELECTORS.mesIdAttr);
+        if (mesId === null) return;
+        const message = getMessageByMesId(mesId);
+        const hasMultipleSwipes = Array.isArray(message?.swipes) && message.swipes.length > 1;
+        const btn = mesEl.querySelector('.swipe-compare-btn');
+        if (!hasMultipleSwipes) {
+            btn?.remove();
+            return;
+        }
+        if (btn) return;
+        const holder = mesEl.querySelector(SELECTORS.buttonsHolder);
+        if (!holder) return;
+        const button = document.createElement('div');
+        button.className = 'mes_button swipe-compare-btn fa-solid fa-code-compare';
+        button.title = '스와이프 비교 / 즐겨찾기';
+        // Message IDs can change after deleting an earlier message.
+        button.addEventListener('click', () => openCompareModal(mesEl.getAttribute(SELECTORS.mesIdAttr)));
+        holder.appendChild(button);
+    }
 
-            const message = getMessageByMesId(mesId);
-            if (!message) return;
+    const dirtyMessages = new Set();
+    let buttonTimer = null;
+    let fullButtonRefresh = false;
 
-            const hasMultipleSwipes = Array.isArray(message.swipes) && message.swipes.length > 1;
-            let btn = mesEl.querySelector('.swipe-compare-btn');
-
-            if (!hasMultipleSwipes) {
-                if (btn) btn.remove();
-                return;
+    function scheduleButtonRefresh() {
+        if (document.hidden || buttonTimer !== null) return;
+        buttonTimer = setTimeout(() => {
+            buttonTimer = null;
+            if (document.hidden) return;
+            if (fullButtonRefresh) {
+                fullButtonRefresh = false;
+                dirtyMessages.clear();
+                (document.getElementById('chat') || document).querySelectorAll(SELECTORS.mes)
+                    .forEach(mes => dirtyMessages.add(mes));
             }
-            if (btn) return;
+            const messages = [...dirtyMessages];
+            dirtyMessages.clear();
+            messages.forEach(updateMessageButton);
+        }, 50);
+    }
 
-            const holder = mesEl.querySelector(SELECTORS.buttonsHolder);
-            if (!holder) return;
+    function refreshAllButtons() {
+        fullButtonRefresh = true;
+        dirtyMessages.clear();
+        scheduleButtonRefresh();
+    }
 
-            btn = document.createElement('div');
-            btn.className = 'mes_button swipe-compare-btn fa-solid fa-code-compare';
-            btn.title = '스와이프 비교 / 즐겨찾기';
-            btn.addEventListener('click', () => openCompareModal(mesId));
-            holder.appendChild(btn);
-        });
+    function queueMessageElement(element) {
+        if (!element?.isConnected) return;
+        if (document.hidden) {
+            // Do not retain detached message trees while the app is backgrounded.
+            fullButtonRefresh = true;
+            dirtyMessages.clear();
+            return;
+        }
+        if (!fullButtonRefresh) dirtyMessages.add(element);
+        scheduleButtonRefresh();
+    }
+
+    function queueMessageId(id) {
+        if (document.hidden) {
+            refreshAllButtons();
+            return;
+        }
+        if (id === null || id === undefined || !/^\d+$/.test(String(id))) {
+            // Compatibility fallback for hosts that omit the event's message ID.
+            refreshAllButtons();
+            return;
+        }
+        const root = document.getElementById('chat') || document;
+        root.querySelectorAll(`${SELECTORS.mes}[${SELECTORS.mesIdAttr}="${Number(id)}"]`)
+            .forEach(queueMessageElement);
+    }
+
+    function onChatMutations(mutations) {
+        if (document.hidden) {
+            fullButtonRefresh = true;
+            dirtyMessages.clear();
+            return;
+        }
+        for (const mutation of mutations) {
+            const changed = [...mutation.addedNodes, ...mutation.removedNodes];
+            // Our own button insert/remove must not schedule another pass.
+            if (mutation.type === 'childList' && changed.length && changed.every(node =>
+                node.nodeType === 1 && node.matches('.swipe-compare-btn'))) continue;
+            const target = mutation.target.nodeType === 1 ? mutation.target : mutation.target.parentElement;
+            const message = target?.closest(SELECTORS.mes);
+            if (message) {
+                queueMessageElement(message);
+                continue;
+            }
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType !== 1) continue;
+                if (node.matches(SELECTORS.mes)) queueMessageElement(node);
+                else node.querySelectorAll(SELECTORS.mes).forEach(queueMessageElement);
+            }
+        }
     }
 
     function scrollToMessage(mesId) {
@@ -595,33 +667,48 @@
     // 초기화
     // ---------------------------------------------------------------------
     function init() {
-        const chatContainer = document.getElementById('chat') || document.body;
-
-        const observer = new MutationObserver(() => {
-            injectButtonsForAllMessages();
-        });
-        observer.observe(chatContainer, { childList: true, subtree: true });
+        const observer = new MutationObserver(onChatMutations);
+        let observedChat;
+        const observeChat = () => {
+            const chat = document.getElementById('chat') || document.body;
+            if (chat === observedChat) return;
+            observer.disconnect();
+            observedChat = chat;
+            observer.observe(chat, { childList: true, subtree: true, attributes: true, attributeFilter: [SELECTORS.mesIdAttr] });
+        };
+        observeChat();
 
         try {
             const ctx = getCtx();
             if (ctx && ctx.eventSource && ctx.event_types) {
-                const events = [
+                const events = new Set([
                     ctx.event_types.MESSAGE_SWIPED,
                     ctx.event_types.MESSAGE_RECEIVED,
                     ctx.event_types.CHARACTER_MESSAGE_RENDERED,
                     ctx.event_types.USER_MESSAGE_RENDERED,
-                    ctx.event_types.CHAT_CHANGED,
-                ].filter(Boolean);
-
-                events.forEach((evt) => {
-                    ctx.eventSource.on(evt, () => setTimeout(injectButtonsForAllMessages, 50));
+                ].filter(Boolean));
+                events.forEach(evt => ctx.eventSource.on(evt, queueMessageId));
+                if (ctx.event_types.CHAT_CHANGED) ctx.eventSource.on(ctx.event_types.CHAT_CHANGED, () => {
+                    observeChat();
+                    refreshAllButtons();
                 });
             }
         } catch (e) {
             console.warn('[swipe-compare] 이벤트 훅 등록 중 일부 실패(무시 가능):', e);
         }
 
-        setTimeout(injectButtonsForAllMessages, 500);
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                clearTimeout(buttonTimer);
+                buttonTimer = null;
+                dirtyMessages.clear();
+                fullButtonRefresh = true;
+            } else {
+                observeChat();
+                refreshAllButtons();
+            }
+        });
+        refreshAllButtons();
         startMenuButtonWatcher();
     }
 
